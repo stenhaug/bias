@@ -98,7 +98,7 @@ toc()
 
 ### lme: adding in student random effects
 
-when we add in student random effects as well, our recovery is much better (e.g. summing the fixed group effects and random item effects we get a difference of 1 for the first four items and a difference of 2 for the last item)
+when we add in student random effects as well, our recovery is better but if you sum the fixed and random effects you still don't see the full difference of 2 on the last item we should have
 
 ```{r}
 tic()
@@ -139,6 +139,8 @@ multipleGroup(
 
 toc()
 ```
+
+this last model seems like the way to go. it isn't clear to me why it does better than the "1 + group + (-1 + group | item) + (1 | student" model
 
 i like this approach a lot. i think this is what karen and mike were doing with the fcme data which at first struck me as odd but now thinking in terms of punting on finding differences in group means and just focusing on difference for each item it makes a lot of sense.
 

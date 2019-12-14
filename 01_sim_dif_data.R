@@ -3,7 +3,7 @@ set.seed(1)
 library(tidyverse)
 library(mirt)
 
-n_students_each_group <- 500
+n_students_each_group <- 10000
 
 # sim old students mean 0 and no bias -------------------------------------
 theta_old <- rnorm(n_students_each_group, 0, 1)

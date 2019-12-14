@@ -1,0 +1,144 @@
+---
+title: "Comparing DIF models"
+output: github_document
+---
+
+our goal is to take data simulated with DIF and walk through a few different models that aim to recover that DIF
+
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(mirt)
+library(lme4)
+library(tictoc)
+```
+
+01_sim_dif_data.R generated data with two groups, young and old, where young students have lower ability and the 5th item contains bias. more specifically:
+
+```{r, echo = FALSE}
+tibble(
+    what = c(paste0("Item ", 1:5, " Easiness"), "Group Mean"),
+    old = c(0, 0, 0, 0, 0, 0),
+    young = c(0, 0, 0, 0, -1, -1)
+) %>%
+    mutate(difference = young - old)
+```
+
+let's read that data in so we have both the wide and long form
+
+```{r, message = FALSE}
+data_dif_long <- read_csv("data-simmed/data_dif_long.csv")
+data_dif_wide <- read_csv("data-simmed/data_dif_wide.csv")
+```
+
+now our goal is to figure out the best model that we can use to figure out what's going on in this data
+
+### mirt helper function
+
+we'll be fitting a few mirt models so it's useful to have a helper function to quickly summarize them
+
+```{r}
+summarize_model <- function(model){
+    coef_young <- coef(model, simplify = TRUE)$young
+    coef_old <- coef(model, simplify = TRUE)$old
+
+    tibble(
+        what = c(paste0("Item ", 1:5, " Easiness"), "Group Mean"),
+        old = c(coef_old$items[ , "d"], coef_old$means),
+        young = c(coef_young$items[ , "d"], coef_young$means)
+    ) %>%
+        mutate(difference = young - old) %>%
+        mutate_if(is.numeric, round, 3)
+}
+```
+
+### mirt: if we knew the anchors
+
+of course if we knew that the first four items were invariant we could use those as anchors and then we recover the data generating process perfectly:
+
+```{r}
+tic()
+
+multipleGroup(
+    data_dif_wide %>% select(-group),
+    1,
+    itemtype = "Rasch",
+    group = data_dif_wide$group,
+    # this notation says freely estimate the group means but
+    # constrain items 1, 2, 3, and 4 to be invariant
+    invariance = c("free_means", "Item_1", "Item_2", "Item_3", "Item_4"),
+    verbose = FALSE
+) %>%
+    summarize_model()
+
+toc()
+```
+
+### lme: item random effects by group 
+
+thanks to mike i think the right framing is simply can our model pick up on the difference in performance between groups on each item 
+
+mike suggested the following model with item random effects by group. pay attention to the difference in performance on the last item (by summing the fixed and random effects). it isn't quite 2 which I'm thinking about as the typical "dampening" of parameters when our model isn't specified fully (in this case we don't have student in the model)
+
+```{r}
+tic()
+
+item_ranef_by_group <- 
+    glmer(
+        resp ~ -1 + group + (-1 + group | item), 
+        data = data_dif_long, 
+        family = binomial
+    )
+
+fixef(item_ranef_by_group) %>% round(2)
+
+ranef(item_ranef_by_group)$item %>% round(2)
+
+toc()
+```
+
+### lme: adding in student random effects
+
+when we add in student random effects as well, our recovery is much better (e.g. summing the fixed group effects and random item effects we get a difference of 1 for the first four items and a difference of 2 for the last item)
+
+```{r}
+tic()
+
+item_ranef_by_group_with_student_ranef <- 
+    glmer(
+        resp ~ -1 + group + (-1 + group | item) + (1 | student), 
+        data = data_dif_long, 
+        family = binomial
+    )
+
+fixef(item_ranef_by_group_with_student_ranef) %>% round(2)
+
+ranef(item_ranef_by_group_with_student_ranef)$item %>% round(2)
+
+toc()
+```
+
+### mirt: fix both group means to 0
+
+going back into the mmle with mirt world, a similar model that makes sense is let's fix both group means to be 0 and then let all of the difference in performances show up in the item paramters. 
+
+indeed we're able to recover the right differences this way. 
+
+```{r}
+tic()
+
+multipleGroup(
+    data_dif_wide %>% select(-group),
+    1,
+    itemtype = "Rasch",
+    group = data_dif_wide$group,
+    # note we haven't freed up means and we haven't specified anchors
+    invariance = "",
+    verbose = FALSE
+) %>%
+    summarize_model()
+
+toc()
+```
+
+i like this approach a lot. i think this is what karen and mike were doing with the fcme data which at first struck me as odd but now thinking in terms of punting on finding differences in group means and just focusing on difference for each item it makes a lot of sense.
+

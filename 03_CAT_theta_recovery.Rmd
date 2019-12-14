@@ -1,0 +1,169 @@
+---
+title: "CAT theta recovery"
+output: github_document
+---
+
+goal is to simulate data from CAT algorithm and then analyze the data without considering the CAT algorithm. does this analysis work? is it thrown off by selection bias from CAT? 
+
+tldr: it seems like modeling the data while ignoring the CAT algorithm works fine. "basically an observation of parameter invariance"
+
+```{r, message = FALSE, warning = FALSE}
+# devtools::install_github("swnydick/catIrt")
+library(catIrt)
+library(mirt)
+library(tidyverse)
+set.seed(1)
+```
+
+run the typical, classic post-hoc CAT
+
+```{r}
+# generating random theta:
+theta <- rnorm(1000)
+
+# generating an item bank under a 2-parameter binary response model:
+b.params <- cbind(a = rep(1, 100), b = rnorm(100, 0, 2), c = 0)
+
+# simulating responses:
+b.resp <- simIrt(theta = theta, params = b.params, mod = "brm")$resp
+
+# prepare cat inputs
+catStart <- 
+    list(
+        init.theta = 0, 
+        n.start = 5,
+        select = "UW-FI", 
+        at = "theta",
+        n.select = 4, 
+        it.range = c(-1, 1),
+        score = "step", 
+        range = c(-1, 1),
+        step.size = 3, 
+        leave.after.MLE = FALSE
+    )
+
+catMiddle <- 
+    list(
+        select = "UW-FI", 
+        at = "theta",
+        n.select = 1,
+        it.range = NULL,
+        score = "MLE",
+        range = c(-6, 6),
+        expos = "none"
+    )
+
+catTerm <- 
+    list(
+        term = "fixed", 
+        n.min = 10, 
+        n.max = 15
+    )
+
+# run catIRT
+cat <- 
+    catIrt(
+        params = b.params, 
+        mod = "brm",  
+        resp = b.resp, 
+        catStart = catStart, 
+        catMiddle = catMiddle, 
+        catTerm = catTerm
+    )
+```
+
+create cat_mat of responses students saw
+
+```{r}
+cat_mat <- matrix(nrow = 1000, ncol = 100)
+
+for (i in 1:1000){
+    indiv <- cat$cat_indiv[[i]]
+    cat_mat[i, indiv$cat_it] <- indiv$cat_resp
+}
+
+colnames(cat_mat) <- paste0("item", 1:100)
+
+cat_mat_reduced <- 
+    cat_mat %>% 
+    as_tibble() %>% 
+    mutate(p = row_number()) %>% 
+    gather(item, resp, -p) %>% 
+    na.omit() %>% 
+    group_by(item) %>% 
+    filter(mean(resp) > 0, mean(resp) < 1) %>%
+    ungroup() %>% 
+    spread(item, resp) %>% 
+    select(-p)
+
+cat_mat_full <- cat$full_resp
+
+attributes(cat_mat_full)$class <- "matrix"
+
+colnames(cat_mat_full) <- paste0("item", 1:100)
+```
+
+fit model to responses students saw
+
+```{r}
+model <- mirt(cat_mat_reduced, 1, "Rasch")
+```
+
+cool, we're doing pretty good on recovery
+
+```{r}
+thetas <- 
+    tibble(
+        true = theta,
+        cat = cat$cat_theta,
+        static = fscores(model, "ML")[ , 1]
+    )
+
+thetas %>% 
+    GGally::ggpairs() +
+    labs(subtitle = "theta estimates good even when data generated CAT but analyzed without considering CAT",
+         caption = "100 item bank. each student takes 15 items based on CAT algorithm.")
+```
+
+the error must come from our item parameter estimates being off. let's let this model fix the item parameters to the true values like the cat algorithm gets to and make sure that we get perfect correlation 
+
+```{r}
+vals <- 
+    mirt(cat_mat_reduced, 1, "Rasch", pars = "values") %>% 
+    as_tibble()
+
+vals$est <- FALSE
+vals$est[length(vals$est)] <- FALSE
+
+class(vals)
+
+vals4model <- 
+    vals %>% 
+    left_join(
+        b.params %>% 
+            as_tibble() %>% 
+            mutate(item = paste0("item", row_number()), b = -b) %>% 
+            select(item, b)
+    ) %>% 
+    mutate(value = if_else(name == "d", b, value)) %>% 
+    select(-b) %>% 
+    as.data.frame()
+
+mod_fix_items <- mirt(cat_mat_reduced, 1, "Rasch", pars = vals4model)
+```
+
+take one more look and yes correlation is 100% when we give static model the true item parameters.
+
+```{r}
+thetas <- 
+    tibble(
+        true = theta,
+        cat = cat$cat_theta,
+        static = fscores(model, "ML")[ , 1],
+        static_true_params = fscores(mod_fix_items, "ML")[ , 1]
+    )
+
+thetas %>% GGally::ggpairs()
+```
+
+in summary, it seems to be okay to ignore CAT. the worry is that the selection bias would throw off our item parameters which would in turn throw off theta estimates. in this basic simulation, that worry doesn't seem to come true

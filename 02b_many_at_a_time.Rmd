@@ -1,4 +1,6 @@
 
+like 02 but simulate many datasets and fit models to it all at once
+
 ```{r}
 set.seed(1)
 library(tidyverse)
@@ -87,10 +89,6 @@ out %>%
     unnest_wider(dif)
 
 fixef(out$model[[1]])
-
-
-
-
 ```
 
 

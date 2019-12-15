@@ -117,6 +117,25 @@ ranef(item_ranef_by_group_with_student_ranef)$item %>% round(2)
 toc()
 ```
 
+### lme: item by group fixed effects and student random effects
+
+this works great and recovers the right differences
+
+```{r}
+tic()
+
+item_fixef_by_group_with_student_ranef <- 
+    glmer(
+        resp ~ -1 + group * as.factor(item) + (1 | student), 
+        data = data_dif_long, 
+        family = binomial
+    )
+
+fixef(item_fixef_by_group_with_student_ranef) %>% round(2)
+
+toc()
+```
+
 ### mirt: fix both group means to 0
 
 going back into the mmle with mirt world, a similar model that makes sense is let's fix both group means to be 0 and then let all of the difference in performances show up in the item paramters. 
@@ -140,7 +159,4 @@ multipleGroup(
 toc()
 ```
 
-this last model seems like the way to go. it isn't clear to me why it does better than the "1 + group + (-1 + group | item) + (1 | student" model
-
 i like this approach a lot. i think this is what karen and mike were doing with the fcme data which at first struck me as odd but now thinking in terms of punting on finding differences in group means and just focusing on difference for each item it makes a lot of sense.
-

@@ -1,0 +1,97 @@
+
+```{r}
+set.seed(1)
+library(tidyverse)
+library(mirt)
+```
+
+```{r}
+f <- function(young){
+    
+    n_students_each_group <- 1000
+
+# sim old students mean 0 and no bias -------------------------------------
+theta_old <- rnorm(n_students_each_group, 0, 1)
+
+data_old <-
+    simdata(
+        a = c(1, 1, 1, 1, 1),
+        d = c(0, 0, 0, 0, 0),
+        itemtype = "2PL",
+        Theta = matrix(theta_old)
+    )
+
+# sim young students mean -1 and item 5 bias ------------------------------
+theta_young <- rnorm(n_students_each_group, 0, 1)
+
+data_young <-
+    simdata(
+        a = c(1, 1, 1, 1, 1),
+        d = young,
+        itemtype = "2PL",
+        Theta = matrix(theta_young)
+    )
+
+data_dif_wide <-
+    rbind(data_old, data_young) %>%
+    as_tibble() %>%
+    mutate(group = rep(c("old", "young"), each = n_students_each_group)) %>%
+    select(group, everything())
+
+data_dif_long <- 
+    data_dif_wide %>%
+    mutate(student = row_number()) %>%
+    gather(item, resp, -group, -student) %>%
+    mutate(item = parse_number(item) %>% as.integer())
+
+list(
+    data_dif_wide = data_dif_wide,
+    data_dif_long = data_dif_long
+)
+}
+```
+
+```{r}
+m <- function(data){
+        glmer(
+            resp ~ -1 + group * as.factor(item) + (1 | student), 
+            data = data$data_dif_long, 
+            family = binomial
+        )
+}
+
+d <- function(m){
+    x <- fixef(m)
+
+    item_1_dif <- x[2] - x[1]
+    
+    list(
+        item_1_dif = item_1_dif,
+        item_2_dif = x[7] + item_1_dif,
+        item_3_dif = x[8] + item_1_dif,
+        item_4_dif = x[9] + item_1_dif,
+        item_5_dif = x[10] + item_1_dif
+    )
+}
+
+out <- 
+    tibble(
+        data = rerun(20, f(c(-1, 0, 1, 2, 3)))
+    ) %>% 
+    mutate(
+        model = data %>% map(m),
+        dif = model %>% map(d)
+    )
+
+out %>% 
+    unnest_wider(dif)
+
+fixef(out$model[[1]])
+
+
+
+
+```
+
+
+
